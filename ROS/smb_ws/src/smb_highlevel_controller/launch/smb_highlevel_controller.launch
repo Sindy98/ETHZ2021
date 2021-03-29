@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+
+  <!-- Launch ROS Package Template Node -->
+  <node pkg="smb_highlevel_controller" type="smb_highlevel_controller" name="smb_highlevel_controller" output="screen">
+    <rosparam command="load" file="$(find smb_highlevel_controller)/config/default.yaml" />
+  </node>
+  
+  <include file="$(find smb_gazebo)/launch/smb_gazebo.launch">
+	<arg name="laser_enabled"   value="true"/>
+	<arg name="world_file" value="$(find smb_highlevel_controller)/worlds/singlePillar.world" />
+  </include>
+
+  <node name="rviz" type="rviz" pkg="rviz" />
+</launch>
