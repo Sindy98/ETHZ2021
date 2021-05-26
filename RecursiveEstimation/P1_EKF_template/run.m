@@ -90,15 +90,13 @@ driftVar = zeros(N,1);
 % Call the estimator for each time step.
 
 % Initialization
-[posEst(1,:),linVelEst(1,:),oriEst(1),windEst(1),driftEst(1),...
- posVar(1,:),linVelVar(1,:),oriVar(1),windVar(1),driftVar(1),estState] = ...
-     Estimator_other(estState,[],[],tm(1),estConst);
+[posEst(1,:),linVelEst(1,:),oriEst(1),windEst(1),driftEst(1),posVar(1,:),linVelVar(1,:),oriVar(1),windVar(1),driftVar(1),estState] = Estimator(estState,[],[],tm(1),estConst);
 % Remaining steps
 tstart = tic;
 for n = 2:N
     [posEst(n,:),linVelEst(n,:),oriEst(n),windEst(n),driftEst(n),...
      posVar(n,:),linVelVar(n,:),oriVar(n),windVar(n),driftVar(n),estState] = ...
-         Estimator_other(estState,input(n-1,:),sense(n,:),tm(n),estConst);
+         Estimator(estState,input(n-1,:),sense(n,:),tm(n),estConst);
 end
 tEstAvg = toc(tstart)/(N-1);
 if doplot
@@ -217,3 +215,4 @@ if doplot
     grid on
 end
 return;
+end

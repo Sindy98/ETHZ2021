@@ -69,17 +69,10 @@ if (tm == 0)
     % Do the initialization of your estimator here!
     
     % initial state mean
-%     r = rand*estConst.StartRadiusBound;
-%     rio = rand*pi;
-%     posEst = [r*cos(rio),r*sin(rio)]; % 1x2 matrix
-%     linVelEst = [0,0] % 1x2 matrix
-%     oriEst = 2*(rand-0.5)*estConst.RotationStartBound; % 1x1 matrix
-%     windEst =2*(rand-0.5)*estConst.WindAngleStartBound;% 1x1 matrix
-%     driftEst = estConst.GyroDriftStartBound; % 1x1 matrix
     posEst = [0,0]; % 1x2 matrix
     linVelEst = [0,0]; % 1x2 matrix
     oriEst = 0; % 1x1 matrix
-    windEst =0.01;% 1x1 matrix
+    windEst =0;% 1x1 matrix
     driftEst =0; % 1x1 matrix
     
     % initial state variance
@@ -95,9 +88,8 @@ if (tm == 0)
     estState.xm = [posEst,linVelEst,oriEst,windEst, driftEst];
     % time of last update
     estState.tm = tm;
-    estState.sense = zeros(1,5);
+    estState.sense = NaN(1,5);
 else
-
 %% Estimator iteration.
 % get time since last estimator update
     dt = tm-estState.tm;
@@ -109,20 +101,10 @@ else
     Cw = estConst.windVel;
     Cr = estConst.rudderCoefficient;
     tmp = num2cell(estState.xm);
-    [px,py,sx,sy,ori,wind,drif] = deal(tmp{:});
-    
-%     fun1 = @(p1,p2,sx,sy,ori,wind,drif)[sx,sy,...
-%         cos(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2))-Cda*(sx-Cw*cos(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)),...
-%         sin(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2))-Cda*(sy-Cw*sin(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)),...
-%         Cr*actuate(2),...
-%         0,...
-%         0];
-    xm = ode15s(@odefun,[0,dt],estState.xm);
-%      xm = [sx,sy,cos(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2))-Cda*(sx-Cw*cos(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)),...
-%         sin(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2))-Cda*(sy-Cw*sin(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)),...
-%         Cr*actuate(2),...
-%         0,...
-%         0]*dt+estState.xm;
+    [px,py,sx,sy,ori,wind,drif] = deal(tmp{:});    
+    [t,x]= ode15s(@(t,y) odefun(t,y,actuate,Cdh,Cw,Cr,Cda),[0,dt],[px,py,sx,sy,ori,wind,drif]');
+    xm = x(end,:)
+    shape = size(x);
     func2 = @(p1,p2,sx,sy,ori,wind,drif)[0,0,1,0,0,0,0;...
         0,0,0,1,0,0,0;...
         0,0,...
@@ -136,7 +118,12 @@ else
         cos(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2)),...
         Cda*Cw*cos(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)+Cda*(sy-Cw*sin(wind))^2*Cw*cos(wind)/sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)-Cda*(sx-Cw*cos(wind))*(sy-Cw*sin(wind))*Cw*sin(wind)/sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2),...
         0;zeros(1,7);zeros(1,7);zeros(1,7)];
-    A = func2(px,py,sx,sy,ori,wind,drif)*dt+eye(7);
+    A = eye(7);
+    for i = 1:shape(1)
+        tmp = num2cell(x(i,:));
+        [px,py,sx,sy,ori,wind,drif] = deal(tmp{:});   
+        A = A+func2(px,py,sx,sy,ori,wind,drif)*dt/shape(1);
+    end
     L = [zeros(1,4);zeros(1,4);...
         -cos(ori)*Cdh*(sx^2+sy^2),0,0,0;...
         -sin(ori)*Cdh*(sx^2+sy^2),0,0,0;...
@@ -144,6 +131,7 @@ else
         0,0,1,0;...
         0,0,0,1];
     Pm= A*estState.Pm*A.'+L*diag([estConst.DragNoise,estConst.RudderNoise,estConst.WindAngleNoise,estConst.GyroDriftNoise])*L.';
+    
     % measurement update
     za = sqrt((xm(1)-estConst.pos_radioA(1))^2+(xm(2)-estConst.pos_radioA(2))^2);
     zb = sqrt((xm(1)-estConst.pos_radioB(1))^2+(xm(2)-estConst.pos_radioB(2))^2);
@@ -158,9 +146,10 @@ else
         0,0,0,0,1,0,0;
         ];
     K = Pm*Hk.'/(Hk*Pm*Hk.'+epsi);
-    sense =  keepMeasuremnt(sense,[za,zb,zc,zg,zn]);
+    sense =  keepMeasuremnt(sense,[za,zb,zc,zg,zn],estState);
+    estState.sense = sense;
     estState.xm = xm+(K*(sense - [za,zb,zc,zg,zn]).')';
-    estState.pm = (eye(7)-K*Hk)*Pm;
+    estState.Pm = (eye(7)-K*Hk)*Pm;
     % Get resulting estimates and variances
 
     % Output quantities
@@ -177,20 +166,21 @@ else
     driftVar = var(7);
 end
 end
-function sense = keepMeasuremnt(sense,z)
+%% deal with the absence of the measurement
+function sense = keepMeasuremnt(sense,z,estState)
     for i = 1:5
         if(isnan(sense(i))|isinf(sense(i)))
             sense(i) = z(i);
         end
     end
 end
-function dydt = odefun(t, estState.xm,estConst)
-    tmp = num2cell(estState.xm);
+function dydt = odefun(t,y,actuate,Cdh,Cw,Cr,Cda)
+    tmp = num2cell(y);
     [px,py,sx,sy,ori,wind,drif] = deal(tmp{:});
     dydt = [sx,sy,...
         cos(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2))-Cda*(sx-Cw*cos(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)),...
         sin(ori)*(tanh(actuate(1))-Cdh*(sx^2+sy^2))-Cda*(sy-Cw*sin(wind)*sqrt((sx-Cw*cos(wind))^2+(sy-Cw*sin(wind))^2)),...
         Cr*actuate(2),...
         0,...
-        0];
+        0]';
 end
